@@ -34,14 +34,11 @@ unsafe fn measure_addr(target_adress: *const u8) -> u8 {
             let count_addr = base_addr as usize + i * MULTIPLE_OFFSET;
             let delta_tsc;
             // measure the time
-            let mut res: usize;
             asm!("mfence", "lfence", "rdtsc", "lfence", "shl rdx, $32", "or rax, rdx", "mov rcx, rax",
                  "movzx r9, byte ptr [{0}]",
                  "mfence", "lfence", "rdtsc", "shl rdx, $32", "or rax, rdx", "sub rax, rcx",
                  in(reg) count_addr,
-                 out("rdx") _, out("rcx") _, out("rax") delta_tsc, out("r9") res);
-            println!("{}", std::ptr::read_volatile(count_addr as *const u8));
-            println!("{}", res);
+                 out("rdx") _, out("rcx") _, out("rax") delta_tsc, out("r9") _);
             HISTOGRAM[i][j] = delta_tsc;
         }
     }
@@ -54,15 +51,28 @@ unsafe fn measure_addr(target_adress: *const u8) -> u8 {
         .iter()
         .map(|x| x[NB_TRIES / 2])
         .collect::<Vec<u64>>();
-    //println!("{:?}", HISTOGRAM);
-    println!("{:?}", medians);
-    println!("{}", medians[239]);
+    //println!("{:?}", medians);
 
-    0
+    let (idx, _) = medians
+        .iter()
+        .enumerate()
+        .min_by(|(_, x), (_, y)| x.cmp(y))
+        .unwrap();
+
+    idx as u8
+}
+
+unsafe fn read_ptr(target_adress: *const u8) -> usize {
+    let mut res: usize = 0;
+    for i in 0..8 {
+        res |= (measure_addr((target_adress as usize + i) as *const u8) as usize) << (i * 8);
+    }
+
+    res
 }
 
 fn main() {
-    println!("{}", unsafe {
-        measure_addr(&TO_LEAK as *const usize as *const u8)
+    println!("0x{:x}", unsafe {
+        read_ptr(&TO_LEAK as *const usize as *const u8)
     });
 }
