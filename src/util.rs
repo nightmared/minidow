@@ -103,7 +103,7 @@ pub(crate) fn setup_measurements() {
             TEST_ARR[i] = 127;
         }
 
-        std::ptr::read_volatile(BASE_ADDR as *const u8);
+        core::ptr::read_volatile(BASE_ADDR as *const u8);
         let mut read_cached_time = 0;
         for _ in 0..NB_CYCLES_TRAIN {
             read_cached_time += measure_time_to_read(BASE_ADDR);
@@ -112,14 +112,14 @@ pub(crate) fn setup_measurements() {
 
         let mut read_flushed_time = 0;
         for _ in 0..NB_CYCLES_TRAIN {
-            std::arch::x86_64::_mm_clflush(BASE_ADDR as *mut u8);
+            core::arch::x86_64::_mm_clflush(BASE_ADDR as *mut u8);
             read_flushed_time += measure_time_to_read(BASE_ADDR);
         }
         read_flushed_time /= NB_CYCLES_TRAIN;
 
-        MIN_NB_CYCLES = std::cmp::min(
+        MIN_NB_CYCLES = core::cmp::min(
             200,
-            std::cmp::max(
+            core::cmp::max(
                 140,
                 read_cached_time + (read_flushed_time - read_cached_time) / 2,
             ),

