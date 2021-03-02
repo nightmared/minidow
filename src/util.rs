@@ -1,6 +1,9 @@
 use crate::*;
 
 #[cfg(feature = "handle-sigsegv")]
+use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
+
+#[cfg(feature = "handle-sigsegv")]
 pub(crate) extern "C" fn handle_sigsegv(
     _signal: libc::c_int,
     _info: *mut libc::siginfo_t,
@@ -91,7 +94,7 @@ pub(crate) fn repeat_move_for_training_meltdown() {
     }
 }
 
-pub(crate) fn setup_measurements() {
+pub fn setup_measurements() {
     unsafe {
         let base_addr = TEST_ARR.as_ptr() as usize;
         // align on a cache line size
@@ -129,5 +132,16 @@ pub(crate) fn setup_measurements() {
             "time to read a:\n- cached entry: {}\n- cold entry: {}\nFixing the treshold at {} cycles",
             read_cached_time, read_flushed_time, MIN_NB_CYCLES
         );
+
+        #[cfg(feature = "handle-sigsegv")]
+        sigaction(
+            Signal::SIGSEGV,
+            &SigAction::new(
+                SigHandler::SigAction(handle_sigsegv),
+                SaFlags::empty(),
+                SigSet::empty(),
+            ),
+        )
+        .unwrap();
     };
 }

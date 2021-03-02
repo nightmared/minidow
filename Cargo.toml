@@ -12,5 +12,15 @@ libc = { version = "0.2", optional = true }
 default = ["handle-sigsegv"]
 handle-sigsegv = ["nix", "libc"]
 
+[lib]
+name = "minidow"
+path = "src/lib.rs"
+
+[[bin]]
+name = "minidow"
+path = "src/main.rs"
+
 [profile.release]
-debug = true
+lto = true
+overflow-checks = false
+#debug = true
