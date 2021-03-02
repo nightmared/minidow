@@ -2,6 +2,7 @@
 
 use std::num::Wrapping;
 
+#[cfg(feature = "handle-sigsegv")]
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 
 mod util;
@@ -43,6 +44,7 @@ impl Method for Meltdown {
         target_address: *const u8,
         nb_bytes: usize,
     ) -> Vec<u8> {
+        #[cfg(feature = "handle-sigsegv")]
         sigaction(
             Signal::SIGSEGV,
             &SigAction::new(
@@ -180,7 +182,7 @@ fn main() {
     let (tx, rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
-        let secret: usize = 0xeffeeffeeffeeffe;
+        let secret: usize = 0x1ff23ff45ff67ff8;
         tx.send(&secret as *const _ as usize).unwrap();
         loop {}
     });

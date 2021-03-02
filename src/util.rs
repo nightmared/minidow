@@ -1,5 +1,6 @@
 use crate::*;
 
+#[cfg(feature = "handle-sigsegv")]
 pub(crate) extern "C" fn handle_sigsegv(
     _signal: libc::c_int,
     _info: *mut libc::siginfo_t,

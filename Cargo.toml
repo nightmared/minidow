@@ -5,10 +5,12 @@ authors = ["Simon THOBY <git@nightmared.fr>"]
 edition = "2018"
 
 [dependencies]
-rand = "0.8.3"
-nix = "0.20"
-libc = "0.2"
-lazy_static = "1.4"
+nix = { version = "0.20", optional = true }
+libc = { version = "0.2", optional = true }
+
+[features]
+default = ["handle-sigsegv"]
+handle-sigsegv = ["nix", "libc"]
 
 [profile.release]
 debug = true
