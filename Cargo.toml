@@ -9,8 +9,10 @@ nix = { version = "0.20", optional = true }
 libc = { version = "0.2", optional = true }
 
 [features]
-default = ["handle-sigsegv"]
-handle-sigsegv = ["nix", "libc"]
+default = ["handle-sigsegv", "tester"]
+std = []
+tester = []
+handle-sigsegv = ["nix", "libc", "std"]
 
 [lib]
 name = "minidow"
