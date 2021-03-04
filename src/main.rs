@@ -13,7 +13,7 @@ fn main() {
 
     let secret_addr = rx.recv().unwrap();
 
-    let spectre = Spectre::new(None, None);
+    let spectre = Spectre::new(None, None, None, None);
 
     /*
     println!(

