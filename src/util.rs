@@ -57,7 +57,6 @@ pub fn measure_time_to_read(address: usize) -> u64 {
     delta_tsc
 }
 
-#[inline(always)]
 #[cfg(feature = "tester")]
 pub fn measure_byte<M: Method>() -> Option<u8> {
     unsafe {
@@ -77,7 +76,7 @@ pub fn measure_byte<M: Method>() -> Option<u8> {
     }
 }
 
-#[inline(always)]
+#[inline(never)]
 pub unsafe fn access_memory(base_addr: usize, target_adress: usize) {
     asm!(
         "mov rax, {0}", "movzx rax, byte ptr [rax]", "imul rax, {2}", "add rax, {1}", "movzx rax, byte ptr [rax]",
@@ -86,9 +85,9 @@ pub unsafe fn access_memory(base_addr: usize, target_adress: usize) {
          in(reg) target_adress, in(reg) base_addr, in(reg) MULTIPLE_OFFSET, out("rbx") _, out("rax") _);
 }
 
-#[inline(always)]
+#[inline(never)]
 pub unsafe fn access_memory_spectre(base_addr: usize, off: usize) {
-    let secret_base = MINIDOW_SECRET as *const _ as usize;
+    let secret_base = &MINIDOW_SECRET[64] as *const _ as usize;
     // we can only read the first SPECTRE_LIMIT bytes, so we're safe, right?
     // Right!?
     asm!(

