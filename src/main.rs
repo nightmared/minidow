@@ -13,10 +13,12 @@ fn main() {
 
     let secret_addr = rx.recv().unwrap();
 
+    let spectre = Spectre::new(None, None);
+
     /*
     println!(
         "With Meltdown: 0x{:x}",
-        read_ptr::<Meltdown>(
+        read_ptr(&spectre,
             || {
                 std::fs::read_to_string("/proc/version").unwrap();
             },
@@ -28,12 +30,12 @@ fn main() {
 
     println!(
         "With Spectre: 0x{:x}",
-        read_ptr::<Spectre>(|| {}, secret_addr)
+        read_ptr(&spectre, || {}, secret_addr)
     );
 
     println!(
         "With Meltdown: 0x{:x}",
-        read_ptr::<Meltdown>(|| {}, secret_addr)
+        read_ptr(&Meltdown, || {}, secret_addr)
     );
 
     /*

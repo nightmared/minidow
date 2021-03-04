@@ -58,9 +58,9 @@ pub fn measure_time_to_read(address: usize) -> u64 {
 }
 
 #[cfg(feature = "tester")]
-pub fn measure_byte<M: Method>() -> Option<u8> {
+pub fn measure_byte<M: Method>(method: &M) -> Option<u8> {
     unsafe {
-        let nb_cycles_threshold = MIN_NB_CYCLES + M::NB_CYCLES_OFFSET;
+        let nb_cycles_threshold = MIN_NB_CYCLES + method.nb_cycles_offset();
         for i in 0..256 {
             let count_addr = BASE_ADDR as usize + i as usize * MULTIPLE_OFFSET;
             LATENCIES[i as usize] = measure_time_to_read(count_addr);
@@ -76,6 +76,7 @@ pub fn measure_byte<M: Method>() -> Option<u8> {
     }
 }
 
+#[no_mangle]
 #[inline(never)]
 pub unsafe fn access_memory(base_addr: usize, target_adress: usize) {
     asm!(
@@ -85,8 +86,9 @@ pub unsafe fn access_memory(base_addr: usize, target_adress: usize) {
          in(reg) target_adress, in(reg) base_addr, in(reg) MULTIPLE_OFFSET, out("rbx") _, out("rax") _);
 }
 
+#[no_mangle]
 #[inline(never)]
-pub unsafe fn access_memory_spectre(base_addr: usize, off: usize) {
+pub unsafe extern "C" fn access_memory_spectre(base_addr: usize, off: usize) {
     let secret_base = &MINIDOW_SECRET[64] as *const _ as usize;
     // we can only read the first SPECTRE_LIMIT bytes, so we're safe, right?
     // Right!?
@@ -146,7 +148,13 @@ pub fn setup_measurements() {
         }
         read_flushed_time /= NB_CYCLES_TRAIN;
 
-        MIN_NB_CYCLES = read_cached_time + (read_flushed_time - read_cached_time) / 2;
+        MIN_NB_CYCLES = core::cmp::min(
+            175,
+            core::cmp::max(
+                150,
+                read_cached_time + (read_flushed_time - read_cached_time) / 2,
+            ),
+        );
 
         #[cfg(feature = "std")]
         std::println!(
