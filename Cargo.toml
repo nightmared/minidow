@@ -9,9 +9,10 @@ nix = { version = "0.20", optional = true }
 libc = { version = "0.2", optional = true }
 
 [features]
-default = ["handle-sigsegv", "tester"]
+default = ["handle-sigsegv", "tester", "threading"]
 std = []
-tester = ["std"]
+threading = ["std", "tester"]
+tester = ["std", "libc"]
 handle-sigsegv = ["nix", "libc", "std"]
 
 [lib]
