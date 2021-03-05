@@ -145,6 +145,7 @@ pub fn setup_measurements() {
         }
         read_flushed_time /= NB_CYCLES_TRAIN;
 
+        /*
         MIN_NB_CYCLES = core::cmp::min(
             175,
             core::cmp::max(
@@ -152,6 +153,9 @@ pub fn setup_measurements() {
                 read_cached_time + (read_flushed_time - read_cached_time) / 2,
             ),
         );
+        */
+
+        MIN_NB_CYCLES = 160;
 
         #[cfg(feature = "std")]
         std::println!(

